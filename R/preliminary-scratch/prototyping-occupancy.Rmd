@@ -33,6 +33,7 @@ Outline for Occupancy Modeling with Opportunistic Occurrence Data (as noted in S
 
 This prototyping is going to focus on modeling a one species as full modeling will be resource intensive, this analysis will focus on the Sonoran desert as the delimitation of Area. 
 
+Step 1A: 
 Bring in the shapefile of the Sonoran and all Plant occurrence data related to the Sonoran. 
 ```{r}
 na_ecoregions_3 <- sf::read_sf("/blue/soltis/millerjared/pollen-project/Pollen-DB/raw-data/Ecoregions/na-level3-ecoregions/NA_CEC_Eco_Level3.shp") # EPA North American Ecoregion shapefiles
@@ -85,6 +86,100 @@ merge_tb <- merge_tb[, is_equivalent := n_of_occ == num_rows] # test equivalency
 all_equivalent <- all(merge_tb$is_equivalent)
 merge_tb[, .(.N), by = is_equivalent]
 # So, in short...there are problems by 1-2 records. Unsure what is tripping this atm, this is prob a chat with Rob. For now im going with 'good enough' but will change things when we set up the SQL server. 
+```
+
+Step 1B: Buffer the Sonoran Shp file to account for community sampling that could occur on the region of interest's edges. Filter occurrence records to only include those found within the buffered shp.  
+```{r}
+sonoran_shp_b <- st_buffer(sonoran_shp, dist = 100000) # 100,000 m = 100km
+
+combined_table_f <- combined_table[, latitude := as.numeric(latitude)] # Fix field class
+combined_table_f <- combined_table_f[, longitude := as.numeric(longitude)]
+combined_table_f <- combined_table[!is.na(latitude)] # Remove non-spatial records
+combined_table_f <- combined_table_f[!is.na(longitude)]
+
+# Convert occurrence data to spatial, transfrom to the shapefiles CRS
+combined_table_f <- as.data.frame(combined_table_f) # restate as a data.frame for spatial conversion
+occ_spat <- st_as_sf(combined_table_f, # convert the occurrence data to a spatial object
+                     coords=c("longitude", "latitude"),
+                     crs="+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs",
+                     remove = FALSE)  
+
+occ_spat <- occ_spat %>% 
+  st_transform(crs = st_crs(sonoran_shp_b)) # Transform CRS
+
+# Filter the data according to the shapefile boundary 
+occ_spat_f <- occ_spat[sonoran_shp_b,]
+```
+
+1C: Determine Community Sampling events for *Rafinesquia neomexicana*
+```{r}
+# Modify data to be non-spatial for faster processing
+occ_f <- occ_spat_f %>% 
+  st_drop_geometry()
+
+# Some data prep
+comm_sampling <- occ_f[, c("accepted_name", "eventDate", "latitude", "longitude")] # Select columns of interest
+comm_sampling <- combined_table[coordinateUncertaintyInMeters < 100*1000] # must be less than 10,000m = 10km 
+comm_sampling <- comm_sampling[!is.na(eventDate)] # Drop any NA eventDates
+comm_sampling <- comm_sampling[, eventDate := gsub("T00:00:00", "", eventDate)] # Fix timestamped dates
+comm_sampling <- comm_sampling[, clean_date := ymd(eventDate)] # put in standard format
+comm_sampling <- comm_sampling[!is.na(clean_date)]
+comm_sampling <- distinct(comm_sampling, accepted_name,clean_date, latitude, longitude, .keep_all = TRUE)
+comm_sampling <- comm_sampling[clean_date > ymd("1950-01-01")] # Some reasonable baseline
+comm_sampling <- comm_sampling[clean_date < ymd("2020-12-31")] # End Date (as this is probably about where we have climate data to)
+comm_sampling <- comm_sampling[!is.na(latitude)]
+comm_sampling <- comm_sampling[!is.na(longitude)]
+n_obs_day <- table(comm_sampling$clean_date) # Create a table of cleaned dates. 
+single_obs_dates <- names(n_obs_day[n_obs_day == 1]) # Single Obs Date
+unique_dates <- names(n_obs_day[n_obs_day > 1])
+
+# Create a for loop to look at each interval
+cluster_lists <- list()
+single_obs_data <- comm_sampling[clean_date %in% ymd(single_obs_dates)]
+single_obs_data[, "cluster" := paste0(clean_date, "-", 1)]
+cluster_lists[[1]] <- single_obs_data
+counter <- 2
+for(date_use in unique_dates){
+  
+  cur_date <- comm_sampling[clean_date == date_use]
+  if("Rafinesquia neomexicana" %in% cur_date$accepted_name){ # Here, we grab it if it includes the species of interest
+  lat_lon <- cur_date[, .(longitude, latitude)]
+  
+  xy <- SpatialPointsDataFrame(
+    lat_lon, data.frame(ID = seq(1:nrow(lat_lon))),
+    proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")) 
+  
+  
+  mdist <- distm(xy) # Creates a geodesic distance matrix in meters
+  hc <- hclust(as.dist(mdist), method = "complete") # Cluster all points using hierarchical approach
+  
+  d = 1000 # define a distance threshold (1km)
+  
+ 
+  
+  cur_date[, "cluster" := paste0(clean_date, "-", cutree(hc, h=d))]
+  
+  cluster_lists[[counter]] <- cur_date
+  
+  counter <- counter + 1 
+  
+  print(paste0("subset ", date_use, paste0(" of ", max(unique_dates)))) 
+  }
+ 
+}
+all_clusters <- rbindlist(cluster_lists)
+
+size_clusters <- table(all_clusters$cluster) %>% table()
+
+# percentage of community samplings
+com_sampling_perc <- size_clusters[1]/sum(size_clusters[1:length(size_clusters)])
+
+print(com_sampling_perc) # Clears the 50% requirement. 
+```
+
+2. Decide on the Spatial and temporal scale of the analysis, as well as the size of the occupancy intervals & visit intervals
+```{r}
+
 ```
 
 
