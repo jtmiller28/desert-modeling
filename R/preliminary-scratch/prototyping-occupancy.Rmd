@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## A prototype of Occupancy Modeling: Checking to see if Vaughn Shirey's Occupancy Modeling methods can be used for the Sonoran Desert assemblages
+## A prototype of Occupancy Modeling: Checking to see if Vaughn Shirey's Occupancy Modeling methods can be used for the Sonoran Desert assemblages. The script: (data_process.R)[https://github.com/lmguzman/occ_historical/blob/main/analysis/odonates/scripts/data_process.R] by Vaughn was referenced to build this 
 
 ### Start out small: Model 1 common annual plant species: Rafinesquia neomexicana. 
 
@@ -90,7 +90,7 @@ merge_tb[, .(.N), by = is_equivalent]
 
 Step 1B: Buffer the Sonoran Shp file to account for community sampling that could occur on the region of interest's edges. Filter occurrence records to only include those found within the buffered shp.  
 ```{r}
-sonoran_shp_b <- st_buffer(sonoran_shp, dist = 100000) # 100,000 m = 100km
+sonoran_shp_b <- st_buffer(sonoran_shp, dist = 50000) # 50,000 m = 50km
 
 combined_table_f <- combined_table[, latitude := as.numeric(latitude)] # Fix field class
 combined_table_f <- combined_table_f[, longitude := as.numeric(longitude)]
@@ -179,6 +179,46 @@ print(com_sampling_perc) # Clears the 50% requirement.
 
 2. Decide on the Spatial and temporal scale of the analysis, as well as the size of the occupancy intervals & visit intervals
 ```{r}
+# First lets take a look at the spatial representation
+## set the project crs to North American Equal Area Conic (Albers)
+crs_1 <- "+proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m"
+## Change our buffered shapefile to match this equal area proj
+sonoran_shp_b <- st_transform(sonoran_shp_b, st_crs(crs_1))
+## Make a Grid with 50km gridcells
+grid_1 <-st_make_grid(extent(sonoran_shp_b), cellsize = 50*1000, square = FALSE) %>% # Make a hexagonal grid from the extents of our buffered region
+          st_as_sf(crs = crs_1) %>% # Assign CRS
+          dplyr::mutate(GID = row_number()) # Track Grid IDs by row number in our datatable
+
+
+touching_cells <- grid_2[sonoran_shp_b,]
+
+ggplot() + 
+  geom_sf(sonoran_shp_b, mapping = aes(), fill = "yellow")+
+  geom_sf(sonoran_shp, mapping = aes(), fill = "darkorange") +
+  geom_sf(touching_cells, mapping = aes(), alpha = 0.2) +
+  theme_bw() +
+  ggtitle("Hexagon Intersection Method of Creating a grid over the Sonoran")
+  
+
+## Make convex-hull to show known range
+occ_f <- st_as_sf(occ_f, 
+           coords=c("longitude", "latitude"),
+           crs="+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs") 
+
+occ_f <- occ_f %>% st_transform(crs_1) # transform to equal area proj
+  
+range <- st_convex_hull(st_union(filter(occ_f, accepted_name == "Rafinesquia neomexicana")))
+
+## Graphically represent this 
+grid1_plot <- ggplot()+
+  geom_sf(sonoran_shp, mapping = aes()) +
+  geom_sf(touching_cells, mapping=aes(), fill=NA, color="grey")+
+  geom_sf(range, mapping=aes(), fill="cyan", color="cyan", alpha=0.35) +
+  ggtitle("Rafinesquia neomexicana's occurrence range over the Sonoran Desert")
+  theme_map()
+
+grid1_plot
+
 
 ```
 
