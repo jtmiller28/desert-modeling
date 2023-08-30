@@ -1,0 +1,91 @@
+---
+title: "prototyping-occupancy"
+author: "JT Miller"
+date: "2023-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A prototype of Occupancy Modeling: Checking to see if Vaughn Shirey's Occupancy Modeling methods can be used for the Sonoran Desert assemblages
+
+### Start out small: Model 1 common annual plant species: Rafinesquia neomexicana. 
+
+Load Necessary Libraries 
+```{r message=FALSE}
+library(tidyverse); library(taxotools); library(data.table)
+library(sf); library(cowplot); library(maps); library(mapdata)
+library(ggpubr); library(nimble); library(raster); library(lubridate)
+library(reclin); library(sp); library(rgdal); library(geosphere); library(plotKML)
+```
+
+Outline for Occupancy Modeling with Opportunistic Occurrence Data (as noted in Shirley et al. 2023)
+      1. Determine the proportion of "Community Sampling Events" (CSEs) for the given species *Rafinesquia neomexicana*, where CSEs are defined as sampling events where more than 1 species is collected on the same day within 1km of eachother. 50% is the go-no-go cut off. 
+      2. Decide on the Spatial and temporal scale of the analysis, as well as the size of the occupancy intervals & visit intervals
+      3. Check the Range Overlap of the species
+      4. Check taxonomic scale and Sampling methods. Should non-detections be inferred across the family and genus level? 
+      5. Check whether visit history increases, decreases, or remains constant through occupancy intervals. 
+      6. Remove sites that are only present for a _single_ occupancy interval. They will skew the visit history
+      7. If visit history decreases through time and the probability of community sampling events is too low, re-eval from step 2 on. 
+      
+
+This prototyping is going to focus on modeling a one species as full modeling will be resource intensive, this analysis will focus on the Sonoran desert as the delimitation of Area. 
+
+Bring in the shapefile of the Sonoran and all Plant occurrence data related to the Sonoran. 
+```{r}
+na_ecoregions_3 <- sf::read_sf("/blue/soltis/millerjared/pollen-project/Pollen-DB/raw-data/Ecoregions/na-level3-ecoregions/NA_CEC_Eco_Level3.shp") # EPA North American Ecoregion shapefiles
+
+sonoran_shp <- subset(na_ecoregions_3, na_ecoregions_3$NA_L3NAME == "Sonoran Desert") # Subset for the shapefiles that include the Sonoran Desert
+
+directory <- "/blue/soltis/millerjared/pollen-project/Pollen-DB/pollen-project-cluster/plant-gator-pulls-v0.4/specimen-info-datasets/" # Create a variable with the path of the dir
+file_list <- list.files(directory, full.names = TRUE) # Create a list of all the file-names (which are the accepted species names in the dir)
+species_tables <- list() # Create a species tables holding list
+combined_table <- NULL # Initialize combined_table value as NULL 
+check_line_count <- list() # Create a vector of line counts to check against parent data. 
+for (i in 1:length(file_list)) { 
+  df <- read.delim(file_list[[i]], fill = TRUE, quote = "") # Issue with fread dropping data, conversion necessary
+  dt <- as.data.table(df) # Convert
+  check_line_count[[i]] <- nrow(dt) # Check in place
+  if ("Sonoran Desert" %in% dt$ecoregion) { # Require that Sonoran Desert be present for at least one of the species in the region. 
+    dt[, (colnames(dt)) := lapply(.SD, as.character), .SDcols = colnames(dt)] 
+    if (is.null(combined_table)) {
+      combined_table <- dt
+    } else {
+      combined_table <- rbindlist(list(combined_table, dt), use.names = TRUE, fill = TRUE)
+    }
+  }
+  print(paste0("table ", i, paste0(" of ", length(file_list)))) # Just a check so I can keep track of where in the loop we are
+}
+
+```
+This is a quick check on read-continuity after noticing some odd behavior with fread. Feel free to SKIP as its just data checks. Current Status: Issues, but minimal (1-2 reads seem to be missing for 79 species) chat with Rob about SQL stuff. 
+```{r}
+# Check line count from bash-script reader to insure all lines were read 
+count_read <- read.delim("/blue/soltis/millerjared/desert-modeling/outputs/line_counts.txt", header = FALSE) # see bash script for details.
+run_counts <- combined_table[, .(num_rows = .N), by = accepted_name] # 
+## Extract n_of_occ and accepted_name from the count_read bash file
+count_read <- as.data.table(count_read)
+count_read <- count_read[, n_of_occ := as.integer(gsub("^(\\d+).*", "\\1", V1)) - 1] # Also...headers count as a line so n_of_occ - 1
+count_read <- count_read[, accepted_name := gsub(".*/([^/]+)\\.txt$", "\\1", V1)]
+count_read <- count_read[, accepted_name := gsub("-", " ", accepted_name)]
+
+common_names <- intersect(count_read$accepted_name, run_counts$accepted_name)
+
+count_read <- count_read[accepted_name %in% common_names]
+run_counts <- run_counts[accepted_name %in% common_names]
+
+nrow(count_read) == nrow(run_counts) # Check to see if there is the same number of rows in each comparison table
+
+## Check continuity 
+merge_tb <- merge(count_read, run_counts, by = "accepted_name", suffixes = c("_1", "_2")) # Merge, add suffixes to avoid dup error
+
+merge_tb <- merge_tb[, is_equivalent := n_of_occ == num_rows] # test equivalency
+all_equivalent <- all(merge_tb$is_equivalent)
+merge_tb[, .(.N), by = is_equivalent]
+# So, in short...there are problems by 1-2 records. Unsure what is tripping this atm, this is prob a chat with Rob. For now im going with 'good enough' but will change things when we set up the SQL server. 
+```
+
+
+      
