@@ -190,7 +190,7 @@ grid_1 <-st_make_grid(extent(sonoran_shp_b), cellsize = 50*1000, square = FALSE)
           dplyr::mutate(GID = row_number()) # Track Grid IDs by row number in our datatable
 
 
-touching_cells <- grid_2[sonoran_shp_b,]
+touching_cells <- grid_1[sonoran_shp_b,]
 
 ggplot() + 
   geom_sf(sonoran_shp_b, mapping = aes(), fill = "yellow")+
@@ -206,21 +206,80 @@ occ_f <- st_as_sf(occ_f,
            crs="+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs") 
 
 occ_f <- occ_f %>% st_transform(crs_1) # transform to equal area proj
-  
-range <- st_convex_hull(st_union(filter(occ_f, accepted_name == "Rafinesquia neomexicana")))
 
-## Graphically represent this 
-grid1_plot <- ggplot()+
-  geom_sf(sonoran_shp, mapping = aes()) +
-  geom_sf(touching_cells, mapping=aes(), fill=NA, color="grey")+
-  geom_sf(range, mapping=aes(), fill="cyan", color="cyan", alpha=0.35) +
-  ggtitle("Rafinesquia neomexicana's occurrence range over the Sonoran Desert")
+# make range maps from convex polygons
+range <- list()
+sp_list <- unique(occ_f$accepted_name)
+for(i in 1:length(sp_list)){
+  range[[i]] <- st_convex_hull(st_union(filter(occ_f,
+                                               accepted_name==sp_list[i])))
+}
+
+ggplot()+
+  geom_sf(data=sonoran_shp, mapping=aes())+
+  geom_sf(grid_1, mapping=aes(), fill=NA, color="grey")+
+  geom_sf(range[[1]], mapping=aes(), fill="cyan", color="cyan", alpha=0.35)+
+  geom_sf(filter(occ_f, accepted_name==sp_list[1]), mapping=aes(), color="cyan")+
+  geom_sf(range[[2]], mapping=aes(), fill="red", color="red", alpha=0.35)+
+  geom_sf(filter(occ_f, accepted_name==sp_list[2]), mapping=aes(), color="red")+
+  geom_sf(range[[10]], mapping=aes(), fill="gold", color="gold", alpha=0.35)+
+  geom_sf(filter(occ_f, accepted_name==sp_list[10]), mapping=aes(), color="gold")+
   theme_map()
 
-grid1_plot
+ggplot()+
+  geom_sf(data=sonoran_shp, mapping=aes())+
+  geom_sf(grid_1, mapping=aes(), fill=NA, color="grey")+
+  geom_sf(range[[3872]], mapping=aes(), fill="cyan", color="cyan", alpha=0.35)+
+  geom_sf(filter(occ_f, accepted_name==sp_list[3872]), mapping=aes(), color="royalblue")+
+  ggtitle(paste0("Species Range for ", sp_list[3872])) +
+  theme_map()
 
+# Vaughn's code uses a matrix to assess range overlap, but this a bit challenging with irregularly shaped grids. By their suggestion lets try vectorizing: Using the hex's unique GIDs we're going to index the overlap in ranges. 
+
+## Proof of concept: 
+grid_copy <- touching_cells  # Make a copy of the hex cells that matter
+test <- st_intersects(touching_cells, range[[3872]]) # Find all of the intersecting hex cells that touch the range of R. neomexicana
+
+grid_copy$intersection <- as.integer(test) # Returns 1s for the TRUE values, for some reason returns NAs instead of 0s for FALSE? 
+
+grid_copy <- grid_copy %>% 
+  mutate(intersection = case_when( # Use a case_when to ammend this
+    !is.na(intersection) ~ 1, 
+    TRUE ~ 0
+  ))
+
+# Show a visual... 
+ggplot()+
+  geom_sf(data=sonoran_shp, mapping=aes())+
+  geom_sf(touching_cells, mapping = aes(), color = "grey", alpha = 0.2) +
+  geom_sf(grid_copy[grid_copy$intersection == 1,], mapping=aes(), fill=NA, color="red")+
+  geom_sf(range[[3872]], mapping=aes(), fill="cyan", color="cyan", alpha=0.35)+
+  geom_sf(filter(occ_f, accepted_name==sp_list[3872]), mapping=aes(), color="royalblue")+
+  ggtitle(paste0("Species Range for ", sp_list[3872])) +
+  theme_map()
+```
+Now Create a loop for indexing all of the present cells per plant range. 
+```{r}
 
 ```
+
+
+Extraneous code Im keeping around but is not currently part of the Analysis
+```{r}
+# For determining species range overlaps: The Matrix Gridding Method (Unfinished)
+## Intersect Range Map with grid
+grid_extent <- extent(touching_cells)
+xmin <- grid_extent[1]
+xmax <- grid_extent[2]
+ymin <- grid_extent[3]
+ymax <- grid_extent[4]
+cellsize <- 50*1000
+xr <- (xmax - xmin)/cellsize # Calc using a xmax-xmin/cell_size?
+yr <- (ymax - ymin)/cellsize
+grid_int <- matrix(as.matrix(st_intersects(touching_cells, range)), nrow = xr, ncol = y)
+
+```
+
 
 
       
