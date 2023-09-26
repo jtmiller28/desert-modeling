@@ -18,7 +18,7 @@ Load Necessary Libraries
 library(tidyverse); library(taxotools); library(data.table)
 library(sf); library(cowplot); library(maps); library(mapdata)
 library(ggpubr); library(nimble); library(raster); library(lubridate)
-library(reclin); library(sp); library(rgdal); library(geosphere); library(plotKML)
+library(reclin); library(sp); library(rgdal); library(geosphere); library(plotKML); library(rangeBuilder)
 ```
 
 Outline for Occupancy Modeling with Opportunistic Occurrence Data (as noted in Shirley et al. 2023)
@@ -104,16 +104,22 @@ merge_tb[, .(.N), by = is_equivalent]
 
 Step 1B.1: Buffer the Sonoran Shp file to account for community sampling that could occur on the region of interest's edges. Filter occurrence records to only include those found within the buffered shp.  
 ```{r}
+crs_1 <- "+proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m"
+
 na_ecoregions_3 <- sf::read_sf("/blue/soltis/millerjared/pollen-project/Pollen-DB/raw-data/Ecoregions/na-level3-ecoregions/NA_CEC_Eco_Level3.shp") # EPA North American Ecoregion shapefiles
 
 sonoran_shp <- subset(na_ecoregions_3, na_ecoregions_3$NA_L3NAME == "Sonoran Desert") # Subset for the shapefiles that include the Sonoran Desert
 
-sonoran_shp_b <- st_buffer(sonoran_shp, dist = 50000) # 50,000 m = 50km
+sonoran_shp <- st_transform(sonoran_shp, crs = crs_1) # convert to albers equal area
+
+# Optional step, if we want to add a boundary to the shapefile to account for edge cases. 
+sonoran_shp_b <- st_buffer(sonoran_shp, dist = 50000) # 50,000 m = 50km 
 
 combined_table_f <- combined_table[, latitude := as.numeric(latitude)] # Fix field class
 combined_table_f <- combined_table_f[, longitude := as.numeric(longitude)]
 combined_table_f <- combined_table[!is.na(latitude)] # Remove non-spatial records
 combined_table_f <- combined_table_f[!is.na(longitude)]
+combined_table_f <- combined_table_f[, coordinateUncertaintyInMeters := as.numeric(coordinateUncertaintyInMeters) ] # fixing the numeric
 
 # Convert occurrence data to spatial, transfrom to the shapefiles CRS
 combined_table_f <- as.data.frame(combined_table_f) # restate as a data.frame for spatial conversion
@@ -123,188 +129,21 @@ occ_spat <- st_as_sf(combined_table_f, # convert the occurrence data to a spatia
                      remove = FALSE)  
 
 occ_spat <- occ_spat %>% 
-  st_transform(crs = st_crs(sonoran_shp_b)) # Transform CRS
+  st_transform(crs = st_crs(sonoran_shp)) # Transform CRS
 
 # Filter the data according to the shapefile boundary 
-occ_spat_f <- occ_spat[sonoran_shp_b,]
+occ_spat_f <- occ_spat[sonoran_shp,] # I chose to use non-buffered shape, sub in sonoran_shp_b for buffered shp
 
 # Now transform data back to wgs84 projection for further calculations
 occ_spat_f <- st_transform(occ_spat_f, crs="+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 ```
-1B.2: Use number of samples to build an adequate species list in terms of sampling
-```{r}
-sp_list <- as.data.table(table(occ_spat_f$accepted_name)) %>%
-  rename(accepted_name = V1) %>% 
-  dplyr::filter(N >= 100) # Must have more than 100 entries to be considered. Arbitrary? 
-  
-```
 
-1C: Determine Community Sampling events for *Rafinesquia neomexicana*
-```{r}
-# Modify data to be non-spatial for faster processing
-occ_f <- occ_spat_f %>% 
-  st_drop_geometry()
-
-
-
-# Some data prep
-comm_sampling <- occ_f[, c("accepted_name", "eventDate", "latitude", "longitude", "recordedBy")] # Select columns of interest
-comm_sampling <- combined_table[coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters)] # must be less than 10,000m = 10km 
-comm_sampling <- comm_sampling[!is.na(eventDate)] # Drop any NA eventDates
-comm_sampling <- comm_sampling[, eventDate := gsub("T00:00:00", "", eventDate)] # Fix timestamped dates
-comm_sampling <- comm_sampling[, clean_date := ymd(eventDate)] # put in standard format
-comm_sampling <- comm_sampling[!is.na(clean_date)]
-comm_sampling <- distinct(comm_sampling, accepted_name, clean_date, latitude, longitude, recordedBy, .keep_all = TRUE)
-comm_sampling <- comm_sampling[clean_date > ymd("1950-01-01")] # Some reasonable baseline
-comm_sampling <- comm_sampling[clean_date < ymd("2020-12-31")] # End Date (as this is probably about where we have climate data to)
-comm_sampling <- comm_sampling[!is.na(latitude)]
-comm_sampling <- comm_sampling[!is.na(longitude)]
-n_obs_day <- table(comm_sampling$clean_date) # Create a table of cleaned dates. 
-single_obs_dates <- names(n_obs_day[n_obs_day == 1]) # Single Obs Date
-unique_dates <- names(n_obs_day[n_obs_day > 1])
-
-# Create a for loop to look at each interval
-cluster_lists <- list()
-single_obs_data <- comm_sampling[clean_date %in% ymd(single_obs_dates)]
-single_obs_data[, "cluster" := paste0(clean_date, "-", 1)]
-cluster_lists[[1]] <- single_obs_data
-counter <- 2
-for(date_use in unique_dates){
-  
-  cur_date <- comm_sampling[clean_date == date_use]
-  #if("Rafinesquia neomexicana" %in% cur_date$accepted_name){ # Here, we grab it if it includes the species of interest
-  lat_lon <- cur_date[, .(longitude, latitude)]
-  
-  xy <- SpatialPointsDataFrame(
-    lat_lon, data.frame(ID = seq(1:nrow(lat_lon))),
-    proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")) 
-  
-  
-  mdist <- distm(xy) # Creates a geodesic distance matrix in meters
-  hc <- hclust(as.dist(mdist), method = "complete") # Cluster all points using hierarchical approach
-  
-  d = 1000 # define a distance threshold (1km)
-  
- 
-  
-  cur_date[, "cluster" := paste0(clean_date, "-", cutree(hc, h=d))]
-  
-  cluster_lists[[counter]] <- cur_date
-  
-  counter <- counter + 1 
-  
-  print(paste0("subset ", date_use, paste0(" of ", max(unique_dates)))) 
-  #}
- 
-}
-all_clusters <- rbindlist(cluster_lists)
-
-size_clusters <- table(all_clusters$cluster) %>% table()
-
-# percentage of community samplings
-com_sampling_perc <- size_clusters[1]/sum(size_clusters[1:length(size_clusters)])
-
-print(com_sampling_perc) # Clears the 50% requirement. 
-```
-
-1.C Edited. (Removing as much tidyverse as possible to speed things up)
-```{r}
-# Modify data to be non-spatial for faster processing
-occ_f <- occ_spat_f %>% 
-  st_drop_geometry()
-
-# Change to data.table format
-occ_f <- as.data.table(occ_f)
-
-# Grab only records that have harmonized names that match sp_list
-occ_dat <- occ_f[accepted_name %in% sp_list$Var1]
-
-
-# Remove records that contain too much uncertainty >100km of noted error 
-occ_dat <- occ_dat[coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters)]
-
-# Fix dates: Some data is malformed for date standards
-occ_dat <- occ_dat[!is.na(eventDate)] # Drop any NA eventDates
-occ_dat <- occ_dat[, fixedEventDate := gsub("T\\d+:\\d+:\\d+", "", eventDate)] # Fixes timestamped dates
-occ_dat <- occ_dat[, date_clean := ymd(fixedEventDate)]
-occ_dat <- occ_dat[!is.na(date_clean)]
-
-# Only grab dates of interest: 1950 - 2020
-occ_dat <- occ_dat[date_clean > ymd("1950-01-01") & date_clean <= ymd("2020-12-31")] # create a bounds
-# any(is.na(unique(occ_dat$eventDate))) == TRUE 
-
-# Grab selected fields for analysis
-occ_dat <- occ_dat[, c("accepted_name", "date_clean", "recordedBy", "latitude", "longitude", "year")]
-
-# Approximate the number of 'community sampling events' that are relevant to our species of focus 'Rafinesquia neomexicana' 
-occ_dat <- distinct(occ_dat, accepted_name, date_clean, latitude, longitude, .keep_all = TRUE) # insure distinct
-occ_dat <- occ_dat[!is.na(latitude)] # remove records without latitude 
-occ_dat <- occ_dat[!is.na(longitude)] # remove records without longitude
-occ_dat <- occ_dat[!is.na(recordedBy)] # remove records without recordedBy 
-
-comm_coll <- occ_dat # dt for our community sampling 
-comm_coll$recordedBy %>% table() %>% sort(decreasing = TRUE) %>% head() # Display some collector metrics 
-
-# Cluster the observations by same day within 1km square areas as our proxy for 'community sampling events'
-n_obs_day <- table(comm_coll$date_clean)
-single_obs_dates <- names(n_obs_day[n_obs_day == 1])
-unique_dates <- names(n_obs_day[n_obs_day > 1])
-
-cluster_lists <- list()
-sin_obs_data <- comm_coll[date_clean %in% ymd(single_obs_dates)]
-sin_obs_data[, "cluster" := paste0(date_clean, "-", 1)]
-cluster_lists[[1]] <- sin_obs_data
-counter <- 2
-
-for(date_use in unique_dates){
-  
-  cur_date <- comm_coll[date_clean == date_use]
-    if("Rafinesquia neomexicana" %in% cur_date$accepted_name){ # Here, we grab it if it includes the species of interest
-  lat_lon <- cur_date[,.(longitude, latitude)]
-  
-  xy <- SpatialPointsDataFrame(
-    lat_lon, data.frame(ID=seq(1:nrow(lat_lon))),
-    proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84"))
-  
-  # use the distm function to generate a geodesic distance matrix in meters
-  mdist <- distm(xy)
-  
-  # cluster all points using a hierarchical clustering approach
-  hc <- hclust(as.dist(mdist), method="complete")
-  
-  # define the distance threshold
-  d=1000
-  
-  cur_date[, "cluster" := paste0(date_clean, "-", cutree(hc, h=d))]
-  
-  cluster_lists[[counter]] <- cur_date
-  
-  counter <- counter+1
-  print(paste0("subset ", date_use, paste0(" of ", max(unique_dates)))) # Print out dates to note where we are 
-} # End of if statement 
-} # End of for loop
-all_clusters <- rbindlist(cluster_lists)
-
-size_clusters <- table(all_clusters$cluster) %>% table()
-
-# percentage of community samplings
-print(size_clusters[1]/sum(size_clusters[1:length(size_clusters)]))
-
-```
-
-09-26 v. 
+Step 1C: Defining community sampling events by 1km distance on the same day
 ```{r}
 occ_dat <- occ_spat_f %>% 
   dplyr::filter(coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters)) # remove data based upon uncertainty 
 
 versioned_dat <- occ_dat
-
-sp_list <- as.data.frame(table(occ_dat$accepted_name)) %>% 
-  dplyr::filter(Freq >= 100)
-
-# occ_dat <- occ_dat %>%  # Fix up the dates which have those problematic time stamps
-#   mutate(fixedEventDate =  gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>% 
-#   mutate(date_clean = ymd(fixedEventDate))
 
 comm_collxs <- versioned_dat %>% # take from versioned dat...
   dplyr::select(accepted_name, eventDate, recordedBy, latitude, longitude) %>%  # select cols of interest
@@ -371,7 +210,7 @@ for(date_use in unique_dates){ # recall that date_use is i here... pulling from 
   print(paste0("subset ", date_use, paste0(" of ", max(unique_dates)))) # Print out dates to note where we are 
 }
 
-all_clusters <- rbindlists(cluster_lists) # rbind our cluster lists into a df
+all_clusters <- rbindlist(cluster_lists) # rbind our cluster lists into a df
 
 size_clusters <- table(all_clusters$cluster) %>% # create a freq table
   table() # duplicates(?)
@@ -379,19 +218,13 @@ size_clusters <- table(all_clusters$cluster) %>% # create a freq table
 size_clusters[1]/sum(size_clusters[1:length(size_clusters)]) # measure the proportion of community samplings to total samplings
 
 ```
-v09-26 without recordedBy accounted
+1C (Same as above, but with the field recordedBy removed)
 ```{r}
 occ_dat <- occ_spat_f %>% 
-  dplyr::filter(coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters)) # remove data based upon uncertainty 
+  dplyr::filter(coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters)) %>%  # remove data based upon uncertainty 
+  st_drop_geometry()
 
 versioned_dat <- occ_dat
-
-sp_list <- as.data.frame(table(occ_dat$accepted_name)) %>% 
-  dplyr::filter(Freq >= 100)
-
-# occ_dat <- occ_dat %>%  # Fix up the dates which have those problematic time stamps
-#   mutate(fixedEventDate =  gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>% 
-#   mutate(date_clean = ymd(fixedEventDate))
 
 comm_collxs <- versioned_dat %>% # take from versioned dat...
   dplyr::select(accepted_name, eventDate, recordedBy, latitude, longitude) %>%  # select cols of interest
@@ -400,7 +233,7 @@ comm_collxs <- versioned_dat %>% # take from versioned dat...
   dplyr::filter(!is.na(recordedBy)) %>% # remove NAs for no recordedBy
   mutate(fixedEventDate =  gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>%  # fix time stamped dates
   mutate(date_clean = ymd(fixedEventDate)) %>% # fix up date into ymd using lubridate
-  filter(date_clean > ymd("1950-01-01")) %>% # set a min date
+  filter(date_clean > ymd("1970-01-01")) %>% # set a min date
   filter(date_clean >= ymd("2020-12-31")) # set a max date
   
 comm_collxs$recordedBy %>% table() %>% # take the comms_collxs and create a table
@@ -412,7 +245,6 @@ comm_collxs <- versioned_dat %>%  # take from versioned dat...
   dplyr::select(accepted_name, eventDate, latitude, longitude) %>% 
   distinct() %>% 
   dplyr::filter(!is.na(eventDate), !is.na(latitude), !is.na(longitude)) %>% 
-  dplyr::filter(!is.na(recordedBy)) %>% 
   mutate(fixedEventDate =  gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>%  # fix time stamped dates
   mutate(date_clean = ymd(fixedEventDate)) %>% # fix up date into ymd using lubridate
   filter(date_clean > ymd("1950-01-01")) %>% # set a min date
@@ -458,100 +290,68 @@ for(date_use in unique_dates){ # recall that date_use is i here... pulling from 
   print(paste0("subset ", date_use, paste0(" of ", max(unique_dates)))) # Print out dates to note where we are 
 }
 
-all_clusters <- rbindlists(cluster_lists) # rbind our cluster lists into a df
+all_clusters <- rbindlist(cluster_lists) # rbind our cluster lists into a df
 
 size_clusters <- table(all_clusters$cluster) %>% # create a freq table
   table() # duplicates(?)
 
 size_clusters[1]/sum(size_clusters[1:length(size_clusters)]) # measure the proportion of community samplings to total samplings
 
+print(size_clusters[1]/sum(size_clusters[1:length(size_clusters)])) # 48.6% on last run. 
 ```
 
 
-
-
-
-
-
-
-Check to see if Vaughn's verbatim code gives the same result
+Make Grids + Ranges for indexing
 ```{r}
-# read in GBIF and iDigBio data
-gbif_dat <- occ_spat_f %>%
-  dplyr::filter(coordinateUncertaintyInMeters < 100*1000 | is.na(coordinateUncertaintyInMeters))
+sp_list <- as.data.frame(table(occ_dat$accepted_name)) #%>% 
+  #dplyr::filter(Freq >= 100) # create a species list where there is at least 100 specimens present in the data
 
-occ_dat <- gbif_dat
+occ_spatial <- occ_dat %>% # create a spatial dataset
+  dplyr::select(accepted_name, eventDate, recordedBy, latitude, longitude) %>% 
+  filter(!is.na(accepted_name), accepted_name != "", accepted_name %in% sp_list$Var1) %>% 
+  mutate(fixedEventDate =  gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>% # fix timestamped dates
+  mutate(date_clean = ymd(fixedEventDate)) %>% # set to ymd using lubridate
+  filter(date_clean > ymd("1950-01-01")) %>% # set a min date
+  filter(date_clean <= ymd("2020-12-31")) %>% # set a max date
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = "+proj=longlat +ellps=WGS84 +datum=WGS84") %>%  # set as spatial 
+  st_transform(crs_1) # transform into albers
+ 
+grid_1 <- st_make_grid(extent(sonoran_shp), cellsize = 50*1000, square = FALSE) %>% # 50x50km hex grids
+  st_as_sf(crs = crs_1) %>% # Assign CRS
+  dplyr::mutate(GID = row_number()) # Track Grid IDs by row number in our datatable
 
-# filter the occurrence data to a sensible time frame (1970s-2010s)
-sp_list <- as.data.frame(table(occ_dat$accepted_name)) %>%
-  dplyr::filter(Freq >= 100)
+touching_cells <- grid_1[sonoran_shp,] # define the cells that touch the shapefile 
 
-occ_dat <- occ_dat %>% # Removed: between(year, 1970, 2020),  from Vaughn's code
-  filter(!is.na(accepted_name), accepted_name!="", accepted_name %in% sp_list$Var1) %>%
-  dplyr::select(accepted_name, year, latitude, longitude)
-head(occ_dat)
-plot(occ_dat$longitude, occ_dat$latitude)
+ggplot() + # show this 
+  geom_sf(sonoran_shp, mapping = aes(), fill = "darkorange") +
+  geom_sf(touching_cells, mapping = aes(), alpha = 0.2) +
+  theme_bw() +
+  ggtitle("Hexagon Intersection Method of Creating a grid over the Sonoran")
 
 
-# approximate the number of "community visits" using event dates, collectors, and locations
-comm_coll <- gbif_dat %>%
-  dplyr::select(accepted_name, eventDate, latitude, longitude )%>% # removed the recordedBy after chatting with vaughn
-  distinct() %>% 
-  filter(!is.na(eventDate), !is.na(latitude), !is.na(longitude)) %>% 
-  #filter(!is.na(recordedBy)) %>%
-   mutate(fixedEventDate = gsub("T\\d+:\\d+:\\d+", "", eventDate)) %>% 
-  mutate(date_clean = ymd(fixedEventDate)) %>% 
-  filter(date_clean > ymd("1970-01-01")) %>% 
-  filter(date_clean <= ymd("2020-12-31")) %>%
-  data.table()
+# We'll now format occurrence data for Vaughn's data.prep fxn.
+# Two cases: all & detection
+# All: all species at all sites
+# Detection: species where (at least) on other species was detected
+# Range maps inferred by convex_hulls derived from occurrences 
 
-comm_coll$recordedBy %>% table() %>% sort(decreasing = TRUE) %>% head()
-
-n_obs_day <- table(comm_coll$date_clean)
-single_obs_dates <- names(n_obs_day[n_obs_day == 1])
-unique_dates <- names(n_obs_day[n_obs_day > 1])
-
-cluster_lists <- list()
-sin_obs_data <- comm_coll[date_clean %in% ymd(single_obs_dates)]
-sin_obs_data[, "cluster" := paste0(date_clean, "-", 1)]
-cluster_lists[[1]] <- sin_obs_data
-counter <- 2
-
-for(date_use in unique_dates){
-  
-  cur_date <- comm_coll[date_clean == date_use]
-  #if("Rafinesquia neomexicana" %in% cur_date$accepted_name){ # Here, we grab it if it includes the species of interest
-  lat_lon <- cur_date[,.(longitude, latitude)]
-  
-  xy <- SpatialPointsDataFrame(
-    lat_lon, data.frame(ID=seq(1:nrow(lat_lon))),
-    proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84"))
-  
-  # use the distm function to generate a geodesic distance matrix in meters
-  mdist <- distm(xy)
-  
-  # cluster all points using a hierarchical clustering approach
-  hc <- hclust(as.dist(mdist), method="complete")
-  
-  # define the distance threshold
-  d=1000
-  
-  cur_date[, "cluster" := paste0(date_clean, "-", cutree(hc, h=d))]
-  
-  cluster_lists[[counter]] <- cur_date
-  
-  counter <- counter+1
-  #}
+### make range maps from convex polygons
+range <- list()
+sp_list <- unique(occ_spatial$accepted_name)
+for(i in 1:length(sp_list)){
+  range[[i]] <- st_convex_hull(st_union(filter(occ_f,
+                                               accepted_name==sp_list[i])))
 }
 
-all_clusters <- rbindlist(cluster_lists)
-
-size_clusters <- table(all_clusters$cluster) %>% table()
-
-# percentage of community samplings
-size_clusters[1]/sum(size_clusters[1:length(size_clusters)])
+test <- getDynamicAlphaHull(st_union(filter(occ_spatial, accepted_name[[]])))
 
 ```
+
+
+
+
+
 
 1.D Tidy up the table for spatial/temporal scale analysis on the relevant species 
 ```{r}
