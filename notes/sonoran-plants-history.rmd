@@ -1,0 +1,54 @@
+---
+title: "sonoran-plants-history"
+author: "jt-miller"
+date: "2023-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Sonoran Plants Overview 
+
+#### Historic Thoughts about Deserts
+##### Axelrod 1979 Synopsis 
+Prior belief were that deserts are ancient, with the consideration of the current biota distributed in these regions. Early plant fossil evidence indicates that the tropical deserts were once forests and savannahs (Eocene), succeded by dry tropical forests, woodlands, and thorn forests during the middle to late Tertiary (Axelrod 1950d, 1958, 1970; Axelrod and Raven 1977). 
+
+Present temperate desert regions contained temperate forests, including confiers and deciduous hardwoods, during the late Miocene (Axelrod 1979). **Axelrod therefore suggests that the regional deserts must be more recent then previously thought according to the fossil evidence.** 
+He further suggests that these deserts were formed with gradual change, going through drier and more arid conditions progressively. This in turn suggests that the taxa also adapted progressively to this new desert like enviroment in time. 
+
+Axelrod (1979) proposed the major points about the flora of the Sonoran Desert. \
+1. The plant taxa that occupy the present day Sonoran Desert *originally occupied the dry basins and restricted dry sites* during the Late Cretaceous and Tertiary. \
+2. The taxa in the present desert are derived from alliances of plant formations that inhabited this area during the Late Cretaceous & Tertiary prior to it becoming a regional desert. \
+3. The plant taxa **gradually** adapted to the increasing and spreading regional drought during the Tertiary \
+4. The area has only *recently* became a regional desert with extreme heat and aridity. \
+
+##### Axelrod's general description of the present plant taxa: 
+- Similar taxa to the woodland and chaparral vegetation that occurs on the E and W margins (within the slightly wetter areas). Axelrod proposes that this taxa was more well distributed throughout what is now the Sonoran prior to the desertification. *would be helpful to study the process that causes desertification* \
+- The Sonoran has been described as an **arboreal desert** by its small trees and diverse set of genera within (Shreve 1942, 1951). The following taxa are described by Axelrod as following this arboreal characteristic: arborescent Yuccas, barrel cacti, arborescent columnar cactii, evergreen trees/shrubs, leafless trees(?). shadowless plants(?), leafless succulents, and more. \
+- Axelrod suggests that the habitats that support the largest of arboreal growth forms are on the hills, mountain slopes, and the upper bajadas. He proposes that the higher annual percipitation and more moderate levels of temperature accounts for this characteristic (230-300mm PPT). He suggested that the difference could be 5x more species diversity (life-forms)
+- Axelrod suggests that the Sonoran Desert flora is similar to that of the California floristic province (CFP), but differs in the number of taxa and endemics. He suggests that there are 746 genera (795 in CFP), and 20 (2.7%) of these are endemic to the Sonoran (as compared to the 50, 6.3% endemic to CFP). \
+- He diagnoses there are *2,441 species* within the Sonoran Desert (as compared to the 4,452 in the CFP). *650 species* are endemic to the Sonoran Province (compared to the 2,125 species in CFP). \
+- **Species richness** is thought to be highest in the mountains and the upper bajadas slopes due to increased moisture and more moderate temperatures. \
+- **Axelrod's interpretation is that these areas of high diversity are remenents of past wider distributions that have been restricted with progressive aridification**. The lower desert regions represent the most challenging living conditions, the lack of species existing here represents the challenges in adapting to this enviroment. If true, this is a crucial point to understanding how global change processes project the Sonoran into the future. Maybe we should chat about whether we can study these sky islands and upper bajadas in-depth. Axelrod's example species of this are the *Araucaria*, *Persea*, *Quercus*, and *Thouinia* that are extinct/restricted to moister regions.
+- From woodrat midden's it apears that oak-conifer woodlnad covered much of the Sonoran Desert in Arizona (van Devender and King 1971; Lanner and van Devender 1974; van Devender 1976), (also true for the Northern Chichuahuan Desert (Wells 1966). **This is where the suggestion that teh present desert area is only 10,000-12,000 years old comes from)** \
+- Axelrod notes more evidence in the form of geographically seperated assemblages of related species that exist on opposite sides of the desert. The taxonomic treatment is challenging here as many of these groups have shifted, so maybe look into this aspect deeper. Axelrod's suggestion here is that prior to the reduction in rainfall these species assemblages could of existed throughout the area that is now the Sonoran Desert. 
+- Other notable plant taxa similarities exist between the Sonoran and the coastal southern California within the mountains of central Baja California. Axelrod proposes the same mechanism here of progressive drying. \
+- **Important to Note**: Axelrod seems to be overstating his conclusions, as he notes "the inescapable conclusion" of these taxa destributions is that there has been progressive drying during the Tertiary. He's proposing this with extremely limited geologic history and/or mechanisms. 
+
+##### Axelrod's Paleoenviroment description of the Sonoran Desert 
+5 main points guide Axelrod's interpretations: \
+1. Forests and Savannas dominated over the region into the early Eocene \ 
+2. Woodland and throrn scrub had appaeared by the middle Eocene \ 
+3. Semidesert tracts evidently were present in local edaphic sites and restricted rainshadows and dry valleys in the Ologocene and the Miocene, though the taxa also contributed to grassland, short-tree forests, woodland, and the thorn scrub. \
+4. The semidesert taxa were preadapted both in form and function to the secular trend to increased aridity *big assumption?* \
+5. The present desert vegetation only appeared as a broad regional enviroment in post-Pliestocene time (Axelrod 1958) \
+
+Axelrod proposes that deserts are not as old as previously thought by botanist that note the incredible suite of adaptations present in the plnat taxa, but rather that these plant taxa that were adapted to seasonally dry climates in border tropical and tropical regions have been evolving continuously in local dry areas from the Late Cretaceous to Present. \
+
+Axelrod's version of the Geologic Setting:\ 
+Hidges on the three main points:\
+A. The shifting spatial relations of the coastal strip west of the San Andreas Fault system with a northward displacement of the fssil floras from their original southern distribution \
+B. The evidence of enviroments under which sedimentary rocks associated with fossil floras were formed \
+C. the age of the development of the high relief in the area today
