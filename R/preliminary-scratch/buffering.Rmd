@@ -1,0 +1,140 @@
+---
+title: "buffering"
+author: "jt-miller"
+date: "2023-10-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Methods for buffering species ranges
+
+Load Packages
+```{r}
+library(sf)
+library(sp)
+library(rangeBuilder)
+library(spatstat)
+```
+
+Create a sample distribution 
+```{r}
+set.seed(100)
+
+bbox <- st_as_sfc(st_bbox(c(xmin = -116, xmax = -107, ymin = 26.5, ymax = 35), crs = 4326)) # Create a bounding box that roughly is around the sonoran
+
+# generate some randomized points 
+num_pts <- 100
+random_pts <- st_sample(bbox, size = num_pts, type = "random") # Random dispersion
+plot(random_pts, pch = 2) # Randomized plot within the Sonorans general range 
+
+# generate some clustered points for some more realistic data
+num_clusters <- 30 # create a clustering num 
+cluster_centers <- st_sample(bbox, size = num_clusters, type = "random") # generate anchor pts
+ # Assign number per cluster
+set.seed(100)
+cluster_points <- lapply(cluster_centers, function(center) {
+  num_pts_per_cluster <- sample(1:5, 1) # randomly sample
+  xy_matrix <- matrix(data = c(rnorm(num_pts_per_cluster, mean = center[1], sd = 0.1),
+                                rnorm(num_pts_per_cluster, mean = center[2], sd = 0.1)),
+                      ncol = 2)
+  st_as_sf(st_sfc(st_multipoint(xy_matrix), crs = 4326))
+})
+
+cluster_points <- do.call(rbind, cluster_points)
+plot(cluster_points)
+
+
+### Weighted Cluster Generation
+# Set a random seed for reproducibility
+set.seed(500)
+
+# Define the grid of cells with different weights (example: 3x3 grid)
+weights <- matrix(data = c(50, 49, 0,
+                           0, 0, 0, 
+                           0, 0, 1), nrow = 3, ncol = 3)
+
+weights <- t(weights)
+
+print(weights)
+
+# Calculate the probabilities for cluster center selection based on weights
+weighted_prob <- as.vector(weights) / sum(weights)
+
+# Generate random cluster centers based on the weighted probabilities
+num_clusters <- 50
+cluster_centers <- lapply(1:num_clusters, function(i) {
+  cell_index <- sample(1:length(weighted_prob), size = 1, prob = weighted_prob)
+  row <- ceiling(cell_index / ncol(weights))
+  col <- cell_index - (row - 1) * ncol(weights)
+  cell_center_x <- ((col - 1) + runif(1))  # Randomize within cell
+  cell_center_y <- ((row - 1) + runif(1))
+  st_as_sf(st_sfc(st_point(c(cell_center_x, cell_center_y)), crs = 4326))
+})
+# Combine the cluster centers into one sf object
+cluster_centers_sf <- do.call(rbind, cluster_centers)
+
+# Rest of the code remains the same as before
+plot(cluster_centers_sf)
+
+```
+```{r}
+library(raster)
+r = raster(matrix(1:12,3,4))
+set.seed(23) # make this all reproducible
+cell = sample(1:ncell(r),100, prob=r[], replace=TRUE)
+head(cell)
+
+centres = xyFromCell(r,cell)
+head(centres)
+
+rx = centres[,1] + runif(nrow(centres), -0.5*res(r)[1], 0.5*res(r)[1])
+ry = centres[,2] + runif(nrow(centres), -0.5*res(r)[2], 0.5*res(r)[2])
+plot(r)
+points(rx,ry)
+
+pts <- data.frame(rx,ry)
+
+
+r_sf <- st_as_sf(data.frame(rx, ry))
+
+
+
+```
+
+
+Use rangeBuilder to create an alpha hull 
+```{r}
+# Place random_pts as a df for rangeBuilder fxns 
+coords <- st_coordinates(random_pts)
+random_pts_df <- data.frame(
+  Longitude = coords[, "X"], 
+  Latitude = coords[, "Y"]
+)
+
+coords_clust <- st_coordinates(cluster_centers_sf)
+clustered_pts_df <- data.frame(
+  Longitude = coords_clust[, "X"], 
+  Latitude = coords_clust[, "Y"]
+)
+
+alpha_hull_random <- getDynamicAlphaHull(random_pts_df,
+                                         clipToCoast = "terrestrial") # Note that this argument is default
+
+alpha_hull_clusters <- getDynamicAlphaHull(clustered_pts_df)
+```
+
+
+Plot distributions
+```{r}
+plot(alpha_hull_random[[1]], col=transparentColor('dark green', 0.5), border = NA,
+     main = "alpha hull of random distribution")
+points(random_pts_df[,c('Longitude','Latitude')], cex = 0.5, pch = 3)
+
+plot(alpha_hull_clusters[[1]], col=transparentColor('dark green', 0.5), border = NA,
+     main = "alpha hull of random distribution")
+points(random_pts_df[,c('Longitude','Latitude')], cex = 0.5, pch = 3)
+```
+
